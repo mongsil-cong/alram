@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>점점 커지는 알람</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; }
+  *, *::before, *::after { box-sizing: border-box; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<style>
+  /* Layout: one-column instrument panel. The live clock is the hero, settings sit under it, and a small ramp graph shows how the volume climbs. */
+  :root {
+    --bg: #edf0f4;
+    --panel: #ffffff;
+    --fg: #151a22;
+    --muted: #5b6573;
+    --line: #d5dae2;
+    --accent: #d4401a;
+    --accent-fg: #ffffff;
+    --accent-soft: rgba(212, 64, 26, 0.14);
+    --font-display: "Space Grotesk", "Noto Sans KR", system-ui, sans-serif;
+    --font-body: "Noto Sans KR", system-ui, -apple-system, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1116;
+      --panel: #171b22;
+      --fg: #e9edf2;
+      --muted: #9aa4b2;
+      --line: #2a313b;
+      --accent: #ff6b45;
+      --accent-fg: #1a0c07;
+      --accent-soft: rgba(255, 107, 69, 0.16);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1116;
+    --panel: #171b22;
+    --fg: #e9edf2;
+    --muted: #9aa4b2;
+    --line: #2a313b;
+    --accent: #ff6b45;
+    --accent-fg: #1a0c07;
+    --accent-soft: rgba(255, 107, 69, 0.16);
+    color-scheme: dark;
+  }
+
+  html, body { min-height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.55;
+    padding-block: 28px 40px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .wrap { max-width: 520px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+
+  .clock-card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 28px 20px 22px;
+    text-align: center;
+    transition: background-color .2s, border-color .2s;
+  }
+  .date { color: var(--muted); font-size: 14px; }
+  .clock {
+    font-family: var(--font-display);
+    font-weight: 700;
+    font-size: clamp(52px, 17vw, 88px);
+    line-height: 1.05;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    margin: 6px 0 10px;
+  }
+  .status { font-size: 15px; color: var(--muted); min-height: 1.6em; }
+  .status strong { color: var(--fg); font-weight: 700; }
+
+  body.ringing .clock-card { background: var(--accent); border-color: var(--accent); }
+  body.ringing .clock, body.ringing .date, body.ringing .status, body.ringing .status strong { color: var(--accent-fg); }
+  body.ringing .clock { animation: blink 1s steps(2, jump-none) infinite; }
+  @keyframes blink { 0% { opacity: 1; } 50% { opacity: .35; } 100% { opacity: 1; } }
+
+  .ring-meter { margin-top: 16px; }
+  .ring-meter .label { display: flex; justify-content: space-between; font-size: 14px; color: var(--accent-fg); font-weight: 500; }
+  .bar { height: 10px; border-radius: 5px; background: rgba(0,0,0,.25); overflow: hidden; margin-top: 6px; }
+  .bar > span { display: block; height: 100%; width: 0; background: var(--accent-fg); }
+
+  .ring-actions { display: grid; gap: 10px; margin-top: 18px; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .panel h2 { font-size: 15px; font-weight: 700; margin: 0; }
+  .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .field .row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .field label { font-weight: 500; }
+  .field output { font-family: var(--font-display); font-variant-numeric: tabular-nums; font-weight: 700; }
+  .hint { color: var(--muted); font-size: 13px; }
+
+  input[type="time"] {
+    font-family: var(--font-display);
+    font-size: 34px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 12px;
+    width: 100%;
+    min-width: 0;
+  }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  input:disabled { opacity: .55; }
+
+  button {
+    font: inherit;
+    font-weight: 700;
+    border-radius: 10px;
+    padding: 13px 16px;
+    cursor: pointer;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--fg);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-size: 17px; padding: 15px 16px; }
+  button.big { font-size: 22px; padding: 20px 16px; background: var(--accent-fg); border-color: var(--accent-fg); color: var(--accent); }
+  button.ghost-on-accent { background: transparent; border-color: var(--accent-fg); color: var(--accent-fg); }
+  button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  body.ringing button:focus-visible { outline-color: var(--accent-fg); }
+  .btn-row { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
+
+  .graph { width: 100%; height: auto; display: block; }
+  .graph text { fill: var(--muted); font-family: var(--font-display); font-size: 11px; }
+  .graph .axis { stroke: var(--line); stroke-width: 1; fill: none; }
+  .graph .area { fill: var(--accent-soft); stroke: none; }
+  .graph .line { stroke: var(--accent); stroke-width: 2.5; fill: none; stroke-linejoin: round; }
+  .graph .dot { fill: var(--accent); stroke: var(--panel); stroke-width: 2; }
+
+  .notes { color: var(--muted); font-size: 13px; margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+
+  @media (prefers-reduced-motion: reduce) { body.ringing .clock { animation: none; } }
+</style>
+</head>
+<body>
+
+<main class="wrap">
+  <section class="clock-card" aria-live="polite">
+    <div class="date" id="date"></div>
+    <div class="clock" id="clock">00:00:00</div>
+    <div class="status" id="status">알람이 꺼져 있습니다</div>
+
+    <div id="ringBox" hidden>
+      <div class="ring-meter">
+        <div class="label"><span>현재 볼륨</span><span id="ringPct">0%</span></div>
+        <div class="bar"><span id="ringBar"></span></div>
+      </div>
+      <div class="ring-actions">
+        <button type="button" class="big" id="btnStop">알람 끄기</button>
+        <button type="button" class="ghost-on-accent" id="btnSnooze">5분 뒤 다시 알림</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="setup">
+    <h2>알람 설정</h2>
+
+    <div class="field">
+      <label for="alarmTime">알람 시간</label>
+      <input type="time" id="alarmTime" value="07:00">
+    </div>
+
+    <div class="field">
+      <div class="row"><label for="startVol">시작 볼륨</label><output id="startOut">15%</output></div>
+      <input type="range" id="startVol" min="5" max="60" step="1" value="15">
+    </div>
+
+    <div class="field">
+      <div class="row"><label for="rampSec">최대 볼륨까지 걸리는 시간</label><output id="rampOut">60초</output></div>
+      <input type="range" id="rampSec" min="10" max="300" step="5" value="60">
+    </div>
+
+    <div class="field">
+      <div class="row"><label for="maxVol">최대 볼륨</label><output id="maxOut">100%</output></div>
+      <input type="range" id="maxVol" min="50" max="100" step="1" value="100">
+    </div>
+
+    <div class="field">
+      <div class="hint">알람이 울리면 이 곡선을 따라 볼륨이 올라갑니다.</div>
+      <svg class="graph" viewBox="0 0 320 96" role="img" aria-label="시간에 따른 볼륨 상승 그래프">
+        <line class="axis" x1="34" y1="76" x2="306" y2="76"></line>
+        <line class="axis" x1="34" y1="10" x2="34" y2="76"></line>
+        <polygon class="area" id="rampArea" points=""></polygon>
+        <polyline class="line" id="rampLine" points=""></polyline>
+        <circle class="dot" id="rampDot" r="5" cx="34" cy="76" hidden></circle>
+        <text id="yStart" text-anchor="end" x="28" y="0">0%</text>
+        <text id="yMax" text-anchor="end" x="28" y="0">100%</text>
+        <text x="34" y="92" text-anchor="start">0초</text>
+        <text id="xEnd" x="306" y="92" text-anchor="end">60초</text>
+      </svg>
+    </div>
+
+    <div class="btn-row">
+      <button type="button" class="primary" id="btnArm">알람 켜기</button>
+      <button type="button" id="btnTest">소리 테스트</button>
+    </div>
+  </section>
+
+  <ul class="notes">
+    <li>알람이 울리는 동안 이 탭을 닫지 말고 열어 두세요. 탭이 닫히거나 기기가 꺼지면 울리지 않습니다.</li>
+    <li>알람을 켜는 순간 화면이 꺼지지 않도록 요청합니다. 기기 자체의 무음 모드와 볼륨 설정은 이 페이지가 바꿀 수 없습니다.</li>
+    <li>잠들기 전에 소리 테스트로 시작 볼륨을 확인하세요.</li>
+  </ul>
+</main>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var ctx = null, master = null, schedTimer = null;
+  var state = 'idle'; // idle | armed | ringing
+  var targetTs = 0, ringStart = 0, nextCycle = 0, wake = null;
+  var STORE_KEY = 'rising-alarm-settings';
+
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  function loadSettings() {
+    try {
+      var s = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+      if (!s) return;
+      if (s.time) $('alarmTime').value = s.time;
+      if (s.start) $('startVol').value = s.start;
+      if (s.ramp) $('rampSec').value = s.ramp;
+      if (s.max) $('maxVol').value = s.max;
+    } catch (e) {}
+  }
+  function saveSettings() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(cfg())); } catch (e) {}
+  }
+
+  function cfg() {
+    var start = +$('startVol').value, max = +$('maxVol').value;
+    if (start > max) start = max;
+    return { time: $('alarmTime').value || '07:00', start: start, ramp: +$('rampSec').value, max: max };
+  }
+
+  function volPct(elapsed) {
+    var c = cfg();
+    var p = Math.max(0, Math.min(1, elapsed / c.ramp));
+    return c.start + (c.max - c.start) * p;
+  }
+  function pctToGain(pct) { return Math.pow(pct / 100, 2) * 0.85; }
+
+  function ensureCtx() {
+    if (!ctx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return false;
+      ctx = new AC();
+    }
+    if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
+    return true;
+  }
+
+  function beep(t, peak, out) {
+    var o = ctx.createOscillator();
+    var g = ctx.createGain();
+    o.type = 'square';
+    o.frequency.setValueAtTime(1000, t);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(peak, t + 0.01);
+    g.gain.setValueAtTime(peak, t + 0.11);
+    g.gain.linearRampToValueAtTime(0, t + 0.13);
+    o.connect(g); g.connect(out);
+    o.start(t); o.stop(t + 0.15);
+  }
+
+  function schedule() {
+    if (state !== 'ringing' || !ctx) return;
+    if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
+    while (nextCycle < ctx.currentTime + 1.5) {
+      for (var i = 0; i < 4; i++) {
+        var t = nextCycle + i * 0.24;
+        var peak = pctToGain(volPct(t - ringStart));
+        beep(t, peak, master);
+      }
+      nextCycle += 1.5;
+    }
+  }
+
+  function startRinging() {
+    if (!ensureCtx()) { state = 'idle'; render(); return; }
+    state = 'ringing';
+    master = ctx.createGain();
+    master.gain.value = 1;
+    master.connect(ctx.destination);
+    ringStart = ctx.currentTime + 0.05;
+    nextCycle = ringStart;
+    schedule();
+    schedTimer = setInterval(schedule, 250);
+    render();
+  }
+
+  function stopRinging() {
+    if (schedTimer) { clearInterval(schedTimer); schedTimer = null; }
+    if (master) {
+      try { master.gain.cancelScheduledValues(0); master.gain.value = 0; master.disconnect(); } catch (e) {}
+      master = null;
+    }
+  }
+
+  function requestWake() {
+    try {
+      if (navigator.wakeLock && document.visibilityState === 'visible') {
+        navigator.wakeLock.request('screen').then(function (l) { wake = l; }).catch(function () {});
+      }
+    } catch (e) {}
+  }
+  function releaseWake() {
+    try { if (wake) { wake.release(); wake = null; } } catch (e) {}
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible' && state !== 'idle') requestWake();
+  });
+
+  function computeTarget(timeStr) {
+    var parts = timeStr.split(':');
+    var d = new Date();
+    d.setHours(+parts[0], +parts[1], 0, 0);
+    if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  }
+
+  function arm() {
+    if (!ensureCtx()) {
+      $('status').textContent = '이 브라우저는 소리 재생을 지원하지 않습니다';
+      return;
+    }
+    saveSettings();
+    targetTs = computeTarget(cfg().time);
+    state = 'armed';
+    requestWake();
+    render();
+  }
+  function disarm() {
+    state = 'idle';
+    releaseWake();
+    render();
+  }
+
+  function testSound() {
+    if (!ensureCtx()) return;
+    var c = cfg();
+    var out = ctx.createGain();
+    out.connect(ctx.destination);
+    var peak = pctToGain(c.start);
+    var t0 = ctx.currentTime + 0.05;
+    for (var i = 0; i < 4; i++) beep(t0 + i * 0.24, peak, out);
+    setTimeout(function () { try { out.disconnect(); } catch (e) {} }, 1500);
+  }
+
+  function snooze() {
+    stopRinging();
+    targetTs = Date.now() + 5 * 60 * 1000;
+    state = 'armed';
+    render();
+  }
+  function stopAlarm() {
+    stopRinging();
+    state = 'idle';
+    releaseWake();
+    render();
+  }
+
+  function fmtClock(d) { return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
+  function fmtHM(ts) { var d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+
+  function untilText(ms) {
+    var total = Math.max(0, Math.ceil(ms / 1000));
+    var h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
+    if (h > 0) return h + '시간 ' + m + '분';
+    if (m > 0) return m + '분 ' + pad(s) + '초';
+    return s + '초';
+  }
+
+  function drawRamp(progress) {
+    var c = cfg();
+    var L = 34, R = 306, T = 10, B = 76;
+    var y = function (p) { return B - (B - T) * p / 100; };
+    var y0 = y(c.start), y1 = y(c.max);
+    $('rampLine').setAttribute('points', L + ',' + y0 + ' ' + R + ',' + y1);
+    $('rampArea').setAttribute('points', L + ',' + B + ' ' + L + ',' + y0 + ' ' + R + ',' + y1 + ' ' + R + ',' + B);
+    var ys = $('yStart'), ym = $('yMax');
+    ys.textContent = c.start + '%'; ys.setAttribute('y', y0 + (c.start === c.max ? 4 : 4));
+    ym.textContent = c.max + '%'; ym.setAttribute('y', y1 + 4);
+    if (c.start === c.max) ys.setAttribute('y', y0 + 4);
+    $('xEnd').textContent = c.ramp + '초';
+    var dot = $('rampDot');
+    if (progress == null) { dot.hidden = true; return; }
+    var p = Math.max(0, Math.min(1, progress));
+    dot.hidden = false;
+    dot.setAttribute('cx', L + (R - L) * p);
+    dot.setAttribute('cy', y(c.start + (c.max - c.start) * p));
+  }
+
+  function updateOutputs() {
+    var c = cfg();
+    $('startOut').textContent = c.start + '%';
+    $('maxOut').textContent = c.max + '%';
+    $('rampOut').textContent = c.ramp + '초';
+    drawRamp(state === 'ringing' && ctx ? (ctx.currentTime - ringStart) / c.ramp : null);
+  }
+
+  function render() {
+    var ringing = state === 'ringing', armed = state === 'armed';
+    document.body.classList.toggle('ringing', ringing);
+    $('ringBox').hidden = !ringing;
+    $('setup').hidden = ringing;
+    ['alarmTime', 'startVol', 'rampSec', 'maxVol'].forEach(function (id) { $(id).disabled = armed; });
+    $('btnArm').textContent = armed ? '알람 취소' : '알람 켜기';
+    $('btnTest').disabled = armed;
+    tick();
+  }
+
+  function tick() {
+    var now = new Date();
+    $('clock').textContent = fmtClock(now);
+    $('date').textContent = now.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'long' });
+    var st = $('status');
+
+    if (state === 'armed') {
+      var diff = targetTs - now.getTime();
+      var tomorrow = new Date(targetTs).getDate() !== now.getDate();
+      st.innerHTML = '<strong>' + (tomorrow ? '내일 ' : '') + fmtHM(targetTs) + '</strong>에 울립니다 · ' + untilText(diff) + ' 남음';
+      if (diff <= 0) startRinging();
+    } else if (state === 'ringing') {
+      st.innerHTML = '<strong>알람이 울리고 있습니다</strong>';
+      var elapsed = Math.max(0, ctx.currentTime - ringStart);
+      var pct = Math.round(volPct(elapsed));
+      $('ringPct').textContent = pct + '%';
+      $('ringBar').style.width = pct + '%';
+      drawRamp(elapsed / cfg().ramp);
+    } else {
+      st.textContent = '알람이 꺼져 있습니다';
+    }
+  }
+
+  ['alarmTime', 'startVol', 'rampSec', 'maxVol'].forEach(function (id) {
+    $(id).addEventListener('input', function () { updateOutputs(); saveSettings(); });
+  });
+  $('btnArm').addEventListener('click', function () { state === 'armed' ? disarm() : arm(); });
+  $('btnTest').addEventListener('click', testSound);
+  $('btnStop').addEventListener('click', stopAlarm);
+  $('btnSnooze').addEventListener('click', snooze);
+
+  loadSettings();
+  updateOutputs();
+  render();
+  setInterval(tick, 250);
+})();
+</script>
+</body>
+</html>
