@@ -115,7 +115,7 @@
 
   input[type="time"] {
     font-family: var(--font-display);
-    font-size: 34px;
+    font-size: clamp(26px, 8.5vw, 34px);
     font-weight: 700;
     font-variant-numeric: tabular-nums;
     color: var(--fg);
@@ -183,7 +183,7 @@
 
     <div class="field">
       <label for="alarmTime">알람 시간</label>
-      <input type="time" id="alarmTime" value="07:00">
+      <input type="time" id="alarmTime" step="1" value="07:00:00">
     </div>
 
     <div class="field">
@@ -256,7 +256,7 @@
   function cfg() {
     var start = +$('startVol').value, max = +$('maxVol').value;
     if (start > max) start = max;
-    return { time: $('alarmTime').value || '07:00', start: start, ramp: +$('rampSec').value, max: max };
+    return { time: $('alarmTime').value || '07:00:00', start: start, ramp: +$('rampSec').value, max: max };
   }
 
   function volPct(elapsed) {
@@ -276,29 +276,61 @@
     return true;
   }
 
-  function beep(t, peak, out) {
-    var o = ctx.createOscillator();
-    var g = ctx.createGain();
-    o.type = 'square';
-    o.frequency.setValueAtTime(1000, t);
+  var E8 = 0.16;    // 8분음표 길이(초). 4분음표는 0.32초
+  var STEPS = 128;  // 16마디
+  var CYCLE = STEPS * E8;
+
+  function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+  // 베토벤 교향곡 9번 '환희의 송가' 주제 (C 장조). [MIDI 음, 시작(8분음표 단위), 길이]
+  var LEAD = [
+    [76,0,2],[76,2,2],[77,4,2],[79,6,2],      [79,8,2],[77,10,2],[76,12,2],[74,14,2],
+    [72,16,2],[72,18,2],[74,20,2],[76,22,2],  [76,24,3],[74,27,1],[74,28,4],
+    [76,32,2],[76,34,2],[77,36,2],[79,38,2],  [79,40,2],[77,42,2],[76,44,2],[74,46,2],
+    [72,48,2],[72,50,2],[74,52,2],[76,54,2],  [74,56,3],[72,59,1],[72,60,4],
+    [74,64,2],[74,66,2],[76,68,2],[72,70,2],  [74,72,2],[76,74,1],[77,75,1],[76,76,2],[72,78,2],
+    [74,80,2],[76,82,1],[77,83,1],[76,84,2],[74,86,2],  [72,88,2],[74,90,2],[67,92,4],
+    [76,96,2],[76,98,2],[77,100,2],[79,102,2],  [79,104,2],[77,106,2],[76,108,2],[74,110,2],
+    [72,112,2],[72,114,2],[74,116,2],[76,118,2],  [74,120,3],[72,123,1],[72,124,4]
+  ];
+  var BAR_CHORD = ['C','G','C','G','C','G','C','G','G','G','G','C','C','G','C','C'];
+  var CHORDS = { C: { root: 48, tri: [60, 64, 67] }, G: { root: 43, tri: [59, 62, 67] } };
+  var ARP = [0, 1, 2, 1, 0, 1, 2, 1];
+
+  function tone(type, freq, t, dur, peak, out) {
+    var o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
     g.gain.setValueAtTime(0, t);
     g.gain.linearRampToValueAtTime(peak, t + 0.01);
-    g.gain.setValueAtTime(peak, t + 0.11);
-    g.gain.linearRampToValueAtTime(0, t + 0.13);
+    g.gain.linearRampToValueAtTime(peak * 0.7, t + dur * 0.6);
+    g.gain.linearRampToValueAtTime(0, t + dur);
     o.connect(g); g.connect(out);
-    o.start(t); o.stop(t + 0.15);
+    o.start(t); o.stop(t + dur + 0.02);
+  }
+
+  function playCycle(t0, out, peakAt, limit) {
+    LEAD.forEach(function (n) {
+      if (n[1] >= limit) return;
+      var t = t0 + n[1] * E8, p = peakAt(t), d = n[2] * E8 * 0.95, f = mtof(n[0]);
+      tone('triangle', f, t, d, p * 0.38, out);
+      tone('square', f, t, d, p * 0.06, out);
+    });
+    for (var step = 0; step < limit; step++) {
+      var t2 = t0 + step * E8, p2 = peakAt(t2);
+      var bar = Math.floor(step / 8), pos = step % 8;
+      var ch = CHORDS[BAR_CHORD[bar]];
+      if (pos === 0 || pos === 4) tone('sine', mtof(ch.root), t2, 3 * E8, p2 * 0.22, out);
+      tone('triangle', mtof(ch.tri[ARP[pos]]), t2, E8 * 0.8, p2 * 0.08, out);
+    }
   }
 
   function schedule() {
     if (state !== 'ringing' || !ctx) return;
     if (ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
     while (nextCycle < ctx.currentTime + 1.5) {
-      for (var i = 0; i < 4; i++) {
-        var t = nextCycle + i * 0.24;
-        var peak = pctToGain(volPct(t - ringStart));
-        beep(t, peak, master);
-      }
-      nextCycle += 1.5;
+      playCycle(nextCycle, master, function (t) { return pctToGain(volPct(t - ringStart)); }, STEPS);
+      nextCycle += CYCLE;
     }
   }
 
@@ -340,7 +372,7 @@
   function computeTarget(timeStr) {
     var parts = timeStr.split(':');
     var d = new Date();
-    d.setHours(+parts[0], +parts[1], 0, 0);
+    d.setHours(+parts[0], +parts[1], +(parts[2] || 0), 0);
     if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
     return d.getTime();
   }
@@ -364,13 +396,11 @@
 
   function testSound() {
     if (!ensureCtx()) return;
-    var c = cfg();
     var out = ctx.createGain();
     out.connect(ctx.destination);
-    var peak = pctToGain(c.start);
-    var t0 = ctx.currentTime + 0.05;
-    for (var i = 0; i < 4; i++) beep(t0 + i * 0.24, peak, out);
-    setTimeout(function () { try { out.disconnect(); } catch (e) {} }, 1500);
+    var peak = pctToGain(cfg().start);
+    playCycle(ctx.currentTime + 0.05, out, function () { return peak; }, 16);
+    setTimeout(function () { try { out.disconnect(); } catch (e) {} }, 3800);
   }
 
   function snooze() {
@@ -387,7 +417,7 @@
   }
 
   function fmtClock(d) { return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
-  function fmtHM(ts) { var d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function fmtHM(ts) { var d = new Date(ts); return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds()); }
 
   function untilText(ms) {
     var total = Math.max(0, Math.ceil(ms / 1000));
